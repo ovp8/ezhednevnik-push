@@ -1,0 +1,37 @@
+# render.yaml — Blueprint для деплоя push-сервера «Ежедневника» на Render.
+#
+# Использование: Render Dashboard → New + → Blueprint → выберите репозиторий,
+# где лежит эта папка (render.yaml в корне репо или в папке server/ — тогда
+# укажите Root Directory = server при создании сервиса вручную).
+#
+# Секреты (sync: false) вводятся вручную в Dashboard → Environment:
+#   VAPID_PRIVATE_PEM_B64       — base64 PEM приватного VAPID-ключа
+#   FIREBASE_SERVICE_ACCOUNT_B64 — base64 JSON сервисного аккаунта Firebase
+
+services:
+  - type: web
+    name: ezhednevnik-push
+    runtime: docker
+    plan: free
+    region: frankfurt          # ближайший регион к России
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: VAPID_PRIVATE_PEM_B64
+        sync: false
+      - key: FIREBASE_SERVICE_ACCOUNT_B64
+        sync: false
+      - key: VAPID_SUBJECT
+        value: mailto:daily-planner@example.com
+      - key: TZ_OFFSET_HOURS
+        value: "3"
+      - key: MISSED_GRACE_HOURS
+        value: "12"
+      - key: TICK_SECONDS
+        value: "60"
+      - key: NOTIFY_ALL_TASKS
+        value: "1"
+      - key: CORS_ORIGINS
+        value: https://ovp8.github.io
+      - key: APP_URL
+        value: https://ovp8.github.io/ezhednevnik-offline/
