@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0F1115">
+  <title>Уведомления — Ежедневник</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+      background: #0F1115;
+      color: #E8EAED;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom);
+    }
+
+    .card {
+      width: 100%;
+      max-width: 420px;
+      background: #171A21;
+      border-radius: 20px;
+      padding: 28px 22px;
+      box-shadow: 0 8px 40px rgba(0, 0, 0, .5);
+    }
+
+    h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+
+    .sub { font-size: 14px; color: #9AA0A6; line-height: 1.5; margin-bottom: 18px; }
+
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 14px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: #1F2430;
+      margin-bottom: 10px;
+    }
+
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: #9AA0A6; flex: none; }
+    .dot.ok { background: #34C759; }
+    .dot.warn { background: #FF9F0A; }
+    .dot.err { background: #FF453A; }
+
+    #meta { font-size: 12px; color: #6B7280; text-align: center; margin-bottom: 16px; }
+
+    button {
+      width: 100%;
+      border: none;
+      border-radius: 14px;
+      padding: 15px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-bottom: 10px;
+      -webkit-appearance: none;
+    }
+
+    .primary { background: #0A84FF; color: #fff; }
+    .primary:active { opacity: .8; }
+    .ghost { background: #232936; color: #E8EAED; }
+
+    button:disabled { opacity: .45; cursor: default; }
+
+    .hint {
+      font-size: 13px;
+      color: #9AA0A6;
+      line-height: 1.55;
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid #232936;
+    }
+
+    .hint b { color: #E8EAED; }
+
+    #msg { font-size: 13px; color: #9AA0A6; margin-top: 10px; min-height: 16px; text-align: center; line-height: 1.5; }
+
+    #diagOut {
+      display: none;
+      margin-top: 10px;
+      padding: 10px;
+      background: #0F1115;
+      border-radius: 10px;
+      font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+      font-size: 11px;
+      line-height: 1.5;
+      color: #9AA0A6;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 190px;
+      overflow-y: auto;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="card">
+    <h1>Уведомления</h1>
+    <p class="sub">Системные напоминания «Ежедневника» на этом устройстве — даже когда приложение закрыто.</p>
+
+    <div class="status"><span class="dot" id="dot"></span><span id="statusText">Проверяем…</span></div>
+    <div id="meta"></div>
+
+    <button class="primary" id="btnEnable">Разрешить уведомления</button>
+    <button class="ghost" id="btnTest">Проверить уведомление</button>
+    <button class="ghost" id="btnDiag">Диагностика связи</button>
+    <button class="ghost" id="btnOff">Отключить</button>
+    <button class="ghost" id="btnBack">← Вернуться в приложение</button>
+
+    <div id="msg"></div>
+    <pre id="diagOut"></pre>
+
+    <p class="hint">
+      <b>Установка на iPhone:</b> в Safari нажмите «Поделиться», затем
+      <b>«На экран „Домой“»</b> — приложение появится на рабочем экране
+      без App Store и без Apple ID. Требуется iOS 16.4+.
+    </p>
+  </div>
+
+  <script src="push-bridge.js?v=2.2"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const msg = (t) => { $('msg').textContent = t || ''; };
+
+    function setStatus(kind, text) {
+      $('dot').className = 'dot ' + kind;
+      $('statusText').textContent = text;
+    }
+
+    async function refresh() {
+      // ждём мост (push-bridge.js загружается асинхронно)
+      for (let i = 0; i < 50 && !window.fletPush; i++) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+      if (!window.fletPush) { setStatus('err', 'Мост уведомлений не загрузился'); return; }
+      $('meta').textContent = 'мост ' + (window.fletPush.version || '?') +
+        ' · сервер: ' + (window.fletPush.config && window.fletPush.config.server ? window.fletPush.config.server.replace(/^https?:\/\//, '') : 'не задан');
+      const st = await window.fletPush.status();
+      if (!st.supported) {
+        setStatus('warn', 'Браузер не поддерживает Web Push. Откройте страницу из установленного приложения (иконка на экране «Домой»).');
+        $('btnEnable').disabled = true;
+        return;
+      }
+      if (st.subscribed && st.permission === 'granted') {
+        if (st.serverSynced) {
+          setStatus('ok', 'Уведомления включены ✓ (сервер подтвердил)');
+        } else {
+          setStatus('warn', 'Включены, но сервер ещё не подтвердил — нажмите «Диагностика связи» и пришлите скриншот, если не подтвердится за пару минут');
+        }
+      } else if (st.permission === 'denied') {
+        setStatus('err', 'Запрещено в настройках Safari → Уведомления');
+      } else {
+        setStatus('warn', 'Не включены — нажмите «Разрешить уведомления»');
+      }
+    }
+
+    $('btnEnable').onclick = async () => {
+      try {
+        $('btnEnable').disabled = true;
+        msg('Ожидаем разрешение…');
+        const sub = await window.fletPush.subscribe();
+        msg('Готово: подписка сохранена на push-сервере, расписание передано.');
+        console.log('subscription', sub);
+      } catch (e) {
+        msg('Не получилось: ' + e.message);
+      } finally {
+        $('btnEnable').disabled = false;
+        refresh();
+      }
+    };
+
+    $('btnTest').onclick = async () => {
+      try {
+        if (!window.fletPush.config || !window.fletPush.config.serverConfigured) {
+          msg('Адрес push-сервера не задан (push-bridge.js → PUSH_SERVER).');
+          return;
+        }
+        msg('Отправляем тестовое уведомление…');
+        const resp = await fetch(window.fletPush.config.server + '/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ uid: window.fletPush.getUid() }),
+        });
+        const data = await resp.json();
+        if (data.sent > 0) {
+          msg('Отправлено! Проверьте шторку уведомлений.');
+        } else {
+          msg('Сервер не нашёл активных подписок для вашего входа (' + JSON.stringify(data) + '). Нажмите «Разрешить уведомления», затем повторите тест через минуту.');
+        }
+      } catch (e) {
+        msg('Ошибка: ' + e.message);
+      }
+    };
+
+    // ===== Диагностика (v2.2): проверка связи + журнал событий моста =====
+    $('btnDiag').onclick = async () => {
+      const out = $('diagOut');
+      const showLog = () => {
+        let log = [];
+        try { log = window.fletPush.diagLog ? window.fletPush.diagLog() : []; } catch (e) {}
+        out.textContent = log.length
+          ? log.map(x => x.t + '  ' + x.m).join('\n')
+          : '(журнал пуст — мост не записал событий)';
+        out.style.display = 'block';
+      };
+      showLog();
+      const server = window.fletPush.config && window.fletPush.config.server;
+      if (!server) { msg('Адрес push-сервера не задан.'); return; }
+      msg('Проверяем связь с сервером…');
+      const t0 = Date.now();
+      try {
+        const resp = await fetch(server + '/health?ts=' + Date.now(), { cache: 'no-store' });
+        const dt = Date.now() - t0;
+        const data = await resp.json().catch(() => ({}));
+        msg('Связь есть: HTTP ' + resp.status + ', ' + dt + ' мс. Подписок на сервере: ' +
+          (data.subscriptions !== undefined ? data.subscriptions : '?') +
+          '. Если ниже статус «сервер подтвердил» не появится — нажмите «Разрешить уведомления» ещё раз.');
+      } catch (e) {
+        const dt = Date.now() - t0;
+        msg('Сервер недоступен из браузера (' + dt + ' мс): ' + e.message +
+          '. Сделайте скриншот этого сообщения и журнала ниже.');
+      }
+      refresh();
+    };
+
+    $('btnOff').onclick = async () => {
+      try {
+        await window.fletPush.unsubscribe();
+        msg('Уведомления отключены.');
+      } catch (e) {
+        msg('Ошибка: ' + e.message);
+      }
+      refresh();
+    };
+
+    $('btnBack').onclick = () => {
+      // возвращаемся к открытому приложению; если истории нет — на главную
+      if (window.history && window.history.length > 1) {
+        window.history.back();
+        setTimeout(() => { window.location.href = './'; }, 1500);
+      } else {
+        window.location.href = './';
+      }
+    };
+
+    refresh();
+  </script>
+</body>
+
+</html>
